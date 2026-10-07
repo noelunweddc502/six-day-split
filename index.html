@@ -82,6 +82,7 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline
 .back{width:40px;height:40px;border-radius:50%;background:var(--surface);border:1px solid var(--line);display:grid;place-items:center;font-size:20px;flex:none}
 .bar h1{font-family:var(--display);font-weight:800;font-size:32px;line-height:1;margin:0;text-transform:uppercase}
 .bar .sub{font-size:13px;color:var(--muted)}
+.bar h1.long{font-size:24px;line-height:1.05;text-wrap:balance}
 .bar .count{margin-left:auto;text-align:right;font-size:13px;color:var(--muted)}
 .bar .count b{display:block;font-size:18px;color:var(--fg)}
 .prog{height:6px;background:var(--surface-2);border-radius:99px;margin-top:10px;overflow:hidden}
@@ -112,6 +113,19 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline
 .finish{margin-top:22px;width:100%;padding:16px;border-radius:16px;background:var(--fg);color:var(--bg);font-weight:700;font-size:16px}
 .finish.confirm{background:var(--done);color:var(--accent-fg)}
 .reset{display:block;margin:12px auto 0;font-size:13px;color:var(--muted);text-decoration:underline}
+
+/* History */
+.row-link{display:flex;justify-content:space-between;width:100%;padding:11px 14px;border-top:1px solid var(--line);font-size:14px;text-align:left}
+.log > :first-child{border-top:0}
+.last{display:flex;gap:8px;align-items:center;margin-top:8px;padding:7px 10px;border-radius:9px;background:var(--surface-2);font-size:12.5px;color:var(--muted);width:100%;text-align:left}
+.last b{color:var(--fg);font-size:12.5px;flex:1;min-width:0;overflow-wrap:anywhere}
+.hist{text-align:left;width:100%}
+.hrow{display:flex;gap:8px;flex-wrap:wrap}
+.hset{display:grid;text-align:center;background:var(--surface-2);border-radius:10px;padding:6px 10px;min-width:64px;border:1.5px solid transparent}
+.hset b{font-family:var(--mono);font-size:16px}
+.hset i{font-style:normal;font-family:var(--mono);font-size:11.5px;color:var(--muted)}
+.hset.on{border-color:var(--done);background:var(--done-bg)}
+.more{font-size:12.5px;color:var(--accent);font-weight:600}
 
 /* Rest timer */
 .timer{position:fixed;left:0;right:0;bottom:0;z-index:10;padding:12px 16px calc(14px + env(safe-area-inset-bottom,0px));background:var(--surface);border-top:1px solid var(--line);box-shadow:0 -8px 24px rgba(0,0,0,.12)}
@@ -213,6 +227,11 @@ function counts(day){
   return {t,d};
 }
 const fmtDate = iso => new Date(iso).toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'});
+const itemById = iid => { for(const d of DAYS){ const it=d.items.find(x=>x.id===iid); if(it) return Object.assign({day:d}, it); } return null; };
+const fmtWs = ws => ws.map(v=>has(v)?v:'—').join(' · ');
+const anyW = ws => ws && ws.some(has);
+/* Most recent finished workout that logged this exercise */
+function lastFor(iid){ for(let k=S.log.length-1;k>=0;k--){ const e=S.log[k].ex&&S.log[k].ex[iid]; if(e) return {date:S.log[k].date, ...e}; } return null; }
 function lastDone(day){ const l=S.log.filter(x=>x.day===day); return l.length? l[l.length-1].date : null; }
 function nextDay(){
   if(!S.log.length) return DAYS[0];
@@ -225,7 +244,11 @@ const app=document.getElementById('app');
 
 function render(){
   const id=location.hash.slice(1);
-  if(byId(id)) renderDay(id); else renderHome();
+  if(byId(id)) renderDay(id);
+  else if(id==='history') renderHistory();
+  else if(id.startsWith('w-') && S.log[+id.slice(2)]) renderWorkout(+id.slice(2));
+  else if(id.startsWith('x-') && itemById(id.slice(2))) renderExercise(id.slice(2));
+  else renderHome();
 }
 
 function renderHome(){
@@ -245,12 +268,12 @@ function renderHome(){
       <div class="meta"><span>${d.items.length} exercises</span>${k.d?`<span class="partial num">${k.d}/${k.t}</span>`:`<span>${ld?fmtDate(ld):'—'}</span>`}</div></button>`;
   });
   h+=`</div></div><div class="section"><div class="label">Recent workouts</div><div class="log">`;
-  const recent=S.log.slice(-6).reverse();
-  h+= recent.length ? recent.map(x=>`<div><span>${byId(x.day)?.name||x.day}</span><span class="muted num">${x.sets} sets · ${fmtDate(x.date)}</span></div>`).join('')
+  const n=S.log.length;
+  h+= n ? logRows(Math.max(0,n-5), n) + (n>5?`<button class="row-link" data-go="history"><span>All workouts</span><span class="muted num">${n} ›</span></button>`:'')
     : `<div><span class="muted">Finish a workout and it shows up here.</span></div>`;
   h+=`</div></div>`;
   h+=`<div class="section"><div class="label">Backup</div><div class="backup">
-    <p class="muted">Your workouts save on this phone only. Copy a backup code now and then, and paste it here to restore on a new phone.</p>
+    <p class="muted">Your workouts and weight history save on this phone only. Copy a backup code now and then, and paste it here to restore on a new phone.</p>
     <div class="brow"><button class="pill" data-copy>Copy backup code</button><button class="pill" data-restore-open>Restore</button></div>
     <div id="bmsg" class="bmsg" role="status"></div>
     <div id="rbox" hidden><textarea id="rcode" rows="3" placeholder="Paste backup code"></textarea><button class="pill primary" data-restore>Restore from code</button></div>
@@ -258,10 +281,45 @@ function renderHome(){
   app.innerHTML=h;
 }
 
+function logRows(from,to){
+  let r=''; for(let k=to-1;k>=from;k--){ const x=S.log[k];
+    r+=`<button class="row-link" data-go="w-${k}"><span>${byId(x.day)?.name||x.day}</span><span class="muted num">${x.sets} sets · ${fmtDate(x.date)} ›</span></button>`; }
+  return r;
+}
+function topBar(title, sub){
+  return `<div class="bar"><div class="bar-row"><button class="back" data-back aria-label="Back">‹</button>
+    <div><h1${title.length>16?' class="long"':''}>${title}</h1><div class="sub">${sub}</div></div></div></div>`;
+}
+function renderHistory(){
+  app.innerHTML = topBar('History', `${S.log.length} workouts on this phone`) +
+    `<div class="list"><div class="log">${S.log.length?logRows(0,S.log.length):'<div><span class="muted">No workouts yet.</span></div>'}</div></div>`;
+}
+function renderWorkout(k){
+  const x=S.log[k], d=byId(x.day);
+  let h=topBar(d?d.name:x.day, `${new Date(x.date).toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric',year:'numeric'})} · ${x.sets} sets`)+'<div class="list">';
+  if(!x.ex){ h+=`<p class="hint">This workout was logged before detailed history was added, so only the set count was saved.</p>`; }
+  else (d?d.items:[]).forEach(it=>{
+    const e=x.ex[it.id]; if(!e) return;
+    h+=`<button class="card hist" data-go="x-${it.id}"><h3>${it.n}</h3><div class="hrow">${it.r.map((r,i)=>`<span class="hset${e.d&&e.d[i]?' on':''}"><b>${r}</b><i>${has(e.w[i])?e.w[i]+' lb':'—'}</i></span>`).join('')}</div><span class="more">Exercise history ›</span></button>`;
+  });
+  app.innerHTML=h+'</div>';
+}
+function renderExercise(iid){
+  const it=itemById(iid);
+  const rows=[]; S.log.forEach(x=>{ const e=x.ex&&x.ex[iid]; if(e) rows.push({date:x.date, ...e}); });
+  rows.reverse();
+  const best=rows.reduce((m,r)=>Math.max(m,...r.w.filter(has).map(Number)),0);
+  let h=topBar(it.n, `${it.day.name} · ${rows.length} time${rows.length===1?'':'s'} logged${best?` · Best ${best} lb`:''}`)+'<div class="list">';
+  h+= rows.length ? `<div class="log">${rows.map(r=>`<div><span class="muted">${fmtDate(r.date)}</span><span class="num">${fmtWs(r.w)}</span></div>`).join('')}</div>`
+    : `<p class="hint">No finished workouts include this exercise yet.</p>`;
+  app.innerHTML=h+'</div>';
+}
+
 function card(day,it){
   const a=doneArr(day,it), w=weights(it), all=a.every(Boolean);
   return `<div class="card${all?' complete':''}"><div>
-    ${it.tag?`<div class="tag">${it.tag}</div>`:''}<h3>${it.n}</h3>${it.note?`<div class="note">${it.note}</div>`:''}</div>
+    ${it.tag?`<div class="tag">${it.tag}</div>`:''}<h3>${it.n}</h3>${it.note?`<div class="note">${it.note}</div>`:''}
+    ${(()=>{ const L=lastFor(it.id); return L&&anyW(L.w) ? `<button class="last" data-go="x-${it.id}"><span>Last · ${fmtDate(L.date)}</span><b class="num">${fmtWs(L.w)}</b><span>›</span></button>` : ''; })()}</div>
   <div class="sets">${it.r.map((r,i)=>{
     const prev = i>0 ? w[i-1] : null;
     return `<div class="set${a[i]?' on':''}">
@@ -297,6 +355,7 @@ app.addEventListener('click',e=>{
   const t=e.target.closest('button'); if(!t) return;
   if(t.dataset.go){ location.hash=t.dataset.go; return; }
   if('home' in t.dataset){ location.hash=''; return; }
+  if('back' in t.dataset){ if(history.length>1) history.back(); else location.hash=''; return; }
   if('copy' in t.dataset){
     const code=toCode(), msg=document.getElementById('bmsg');
     navigator.clipboard.writeText(code).then(()=>{ msg.textContent='Backup code copied. Paste it in your notes or texts.'; })
@@ -322,7 +381,8 @@ app.addEventListener('click',e=>{
   if('finish' in t.dataset){
     const c=counts(day);
     if(!confirmFinish){ confirmFinish=true; renderDay(day); return; }
-    S.log.push({day, date:new Date().toISOString(), sets:c.d}); S.log=S.log.slice(-60);
+    const ex={}; byId(day).items.forEach(it=>{ const w=weights(it), dn=doneArr(day,it); if(anyW(w)||dn.some(Boolean)) ex[it.id]={w:w.slice(), d:dn.slice()}; });
+    S.log.push({day, date:new Date().toISOString(), sets:c.d, ex}); S.log=S.log.slice(-1000);
     delete S.done[day]; save(); confirmFinish=false; stopTimer(); location.hash=''; return;
   }
   if('reset' in t.dataset){ delete S.done[day]; save(); confirmFinish=false; renderDay(day); }
