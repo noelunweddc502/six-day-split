@@ -1,5 +1,5 @@
 // Caches the app so it opens offline at the gym. Bump VERSION when you change any file.
-const VERSION = 'split-v2';
+const VERSION = 'split-v3';
 const FILES = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png', './apple-touch-icon.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(VERSION).then(c => c.addAll(FILES))); self.skipWaiting(); });
 self.addEventListener('activate', e => {

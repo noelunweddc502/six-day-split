@@ -112,6 +112,7 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline
 .hint{font-size:12.5px;color:var(--muted);margin:12px 0 0}
 .finish{margin-top:22px;width:100%;padding:16px;border-radius:16px;background:var(--fg);color:var(--bg);font-weight:700;font-size:16px}
 .finish.confirm{background:var(--done);color:var(--accent-fg)}
+.warn-msg{margin:18px 0 0;padding:12px 14px;border-radius:12px;background:var(--surface-2);color:var(--warn);font-size:14px;font-weight:600}
 .reset{display:block;margin:12px auto 0;font-size:13px;color:var(--muted);text-decoration:underline}
 
 /* History */
@@ -222,8 +223,10 @@ const byId = id => DAYS.find(d=>d.id===id);
 const weights = it => S.w[it.id] || it.r.map(()=>null);
 const has = v => v!==null && v!==undefined && v!=='';
 function doneArr(day,it){ return ((S.done[day]||{})[it.id]) || it.r.map(()=>false); }
+/* A set counts as done when it's checked off OR has a weight typed in */
+function doneEff(day,it){ const a=doneArr(day,it), w=weights(it); return a.map((v,i)=>v||has(w[i])); }
 function counts(day){
-  let t=0,d=0; byId(day).items.forEach(it=>{ const a=doneArr(day,it); t+=a.length; d+=a.filter(Boolean).length; });
+  let t=0,d=0; byId(day).items.forEach(it=>{ const a=doneEff(day,it); t+=a.length; d+=a.filter(Boolean).length; });
   return {t,d};
 }
 const fmtDate = iso => new Date(iso).toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'});
@@ -336,7 +339,7 @@ function renderDay(id){
     <div><h1>${d.name}</h1><div class="sub">${d.focus}</div></div>
     <div class="count"><b class="num">${c.d}/${c.t}</b>sets</div></div>
     <div class="prog"><i style="width:${c.t?c.d/c.t*100:0}%"></i></div></div>
-    <p class="hint">Type the weight under each set. Tap the reps to check the set off and start your rest timer.</p>
+    <p class="hint">Type the weight under each set. Tap the reps to check the set off and start your rest timer. Tap <b>Finish workout</b> twice at the end to save it to your history.</p>
     <div class="list">`;
   let i=0;
   while(i<d.items.length){
@@ -346,7 +349,8 @@ function renderDay(id){
       h+=`<div class="group"><div class="label">Superset · alternate, rest after both</div>${grp.map(g=>card(id,g)).join('')}</div>`;
     } else { h+=card(id,it); i++; }
   }
-  h+=`</div><button class="finish${confirmFinish?' confirm':''}" data-finish>${confirmFinish?`Tap again to log ${c.d} sets`:'Finish workout'}</button>
+  h+=`</div>${confirmFinish==='empty'?`<p class="warn-msg">Nothing to save yet. Type a weight under a set or tap the reps to check it off, then finish.</p>`:''}
+  <button class="finish${confirmFinish===true?' confirm':''}" data-finish>${confirmFinish===true?`Tap again to save · ${c.d} sets`:'Finish workout'}</button>
   <button class="reset" data-reset>Clear checkmarks</button>`;
   app.innerHTML=h;
 }
@@ -380,8 +384,9 @@ app.addEventListener('click',e=>{
   }
   if('finish' in t.dataset){
     const c=counts(day);
-    if(!confirmFinish){ confirmFinish=true; renderDay(day); return; }
-    const ex={}; byId(day).items.forEach(it=>{ const w=weights(it), dn=doneArr(day,it); if(anyW(w)||dn.some(Boolean)) ex[it.id]={w:w.slice(), d:dn.slice()}; });
+    if(!c.d){ confirmFinish='empty'; renderDay(day); return; }
+    if(confirmFinish!==true){ confirmFinish=true; renderDay(day); return; }
+    const ex={}; byId(day).items.forEach(it=>{ const w=weights(it), dn=doneEff(day,it); if(anyW(w)||dn.some(Boolean)) ex[it.id]={w:w.slice(), d:dn.slice()}; });
     S.log.push({day, date:new Date().toISOString(), sets:c.d, ex}); S.log=S.log.slice(-1000);
     delete S.done[day]; save(); confirmFinish=false; stopTimer(); location.hash=''; return;
   }
@@ -396,6 +401,9 @@ app.addEventListener('input',e=>{
   S.w[it.id]=w; save();
   const nxt=document.getElementById(`w-${it.id}-${i+1}`);
   if(nxt) nxt.placeholder = inp.value==='' ? '—' : inp.value;
+  const c=counts(location.hash.slice(1)), cb=document.querySelector('.count b'), pb=document.querySelector('.prog i');
+  if(cb) cb.textContent=`${c.d}/${c.t}`; if(pb) pb.style.width=(c.t?c.d/c.t*100:0)+'%';
+  if(confirmFinish==='empty' && c.d){ confirmFinish=false; const m=document.querySelector('.warn-msg'); if(m) m.remove(); }
 });
 
 /* Rest timer */
